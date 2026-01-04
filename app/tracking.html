@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Tracking lost</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            overflow: hidden;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            background: #111;
+            color: #fff;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+            display: grid;
+            place-items: center;
+        }
+
+        .card {
+            width: 520px;
+            max-width: calc(100vw - 40px);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 18px;
+            padding: 22px 22px 18px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 26px;
+            letter-spacing: 0.2px;
+        }
+
+        p {
+            margin: 10px 0 0;
+            opacity: 0.85;
+            line-height: 1.4;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
+        button {
+            border: 0;
+            border-radius: 14px;
+            padding: 12px 14px;
+            cursor: pointer;
+            font-weight: 800;
+            font-size: 14px;
+        }
+
+        .muted {
+            opacity: 0.55;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>Can’t see your mouth</h1>
+        <p>
+            Tracking has been unavailable for a while (camera angle / lighting / position).
+            Please adjust the screen/camera so your face is visible.
+        </p>
+
+        <div class="row">
+            <button onclick="ok()">Ok — I’ll fix it</button>
+            <button onclick="snooze(15)">Snooze 15 min</button>
+            <button onclick="snooze(60)">Snooze 60 min</button>
+        </div>
+
+        <div class="muted">
+            Tip: keep your face in frame; if you walked away, you can snooze.
+        </div>
+    </div>
+
+    <script>
+        function ok() {
+            // User acknowledges the warning and will adjust camera
+            // Just hide the popup and let tracking continue
+            window.app?.hideTrackingLost();
+        }
+
+        function snooze(minutes) {
+            // Snooze future "tracking lost" alerts
+            window.app?.snoozeTrackingAlerts(minutes);
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") {
+                snooze(15);
+            }
+        });
+    </script>
+
+</body>
+
+</html>

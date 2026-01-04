@@ -1,0 +1,51 @@
+{
+  "name": "stopbitingnailsapp",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64 --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:all": "electron-builder --win --mac --publish never"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.stopbitingnailsapp.app",
+    "productName": "Stop Biting Nails App",
+    "copyright": "Copyright © 2026",
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "app/icon.png"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "app/icon.png",
+      "category": "public.app-category.productivity"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Stop Biting Nails App"
+    }
+  }
+}
