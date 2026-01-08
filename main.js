@@ -140,6 +140,10 @@ function createTray() {
       label: "Quit",
       click: () => {
         app.isQuiting = true;
+        // Destroy all windows first
+        if (blockerWin && !blockerWin.isDestroyed()) blockerWin.destroy();
+        if (trackingWin && !trackingWin.isDestroyed()) trackingWin.destroy();
+        if (mainWin && !mainWin.isDestroyed()) mainWin.destroy();
         app.quit();
       }
     }
