@@ -18,6 +18,61 @@
       display:inline-block; padding:4px 10px; border-radius:999px;
       background:rgba(255,255,255,0.12); margin-left:8px;
     }
+    #debugConsole {
+      position:fixed;
+      top:60px;
+      left:10px;
+      right:10px;
+      bottom:10px;
+      overflow-y:auto;
+      background:rgba(0,0,0,0.92);
+      border:1px solid #444;
+      border-radius:8px;
+      padding:12px;
+      font-family:monospace;
+      font-size:12px;
+      color:#0f0;
+      z-index:9998;
+      display:none;
+    }
+    #debugConsole.visible {
+      display:block;
+    }
+    #debugConsole .error { color:#f55; }
+    #debugConsole .warn { color:#ff0; }
+    #debugConsole .info { color:#0ff; }
+    #debugToggle {
+      position:fixed;
+      top:10px;
+      left:10px;
+      z-index:9999;
+      padding:6px 12px;
+      background:rgba(0,0,0,0.7);
+      border:1px solid #444;
+      border-radius:6px;
+      color:#888;
+      font-size:11px;
+      cursor:pointer;
+    }
+    #debugToggle:hover {
+      background:rgba(0,0,0,0.9);
+      color:#fff;
+    }
+    #debugStats {
+      position:fixed;
+      top:10px;
+      right:10px;
+      background:rgba(0,0,0,0.85);
+      border:1px solid #444;
+      border-radius:8px;
+      padding:8px 12px;
+      font-family:monospace;
+      font-size:12px;
+      color:#fff;
+      z-index:9999;
+    }
+    #debugStats .ok { color:#0f0; }
+    #debugStats .bad { color:#f55; }
   </style>
 </head>
 <body>
@@ -37,10 +92,15 @@
           <button id="calibrate">Calibrate</button>
           <button id="toggleSound">Sound: ON</button>
           <button id="reset">Reset</button>
+          <button id="restartModels">Restart Models</button>
         </div>
       </div>
     </div>
   </div>
+
+  <div id="debugStats"></div>
+  <button id="debugToggle">Debug</button>
+  <div id="debugConsole"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
@@ -60,9 +120,77 @@
     const calibrateBtn = document.getElementById('calibrate');
     const toggleSoundBtn = document.getElementById('toggleSound');
     const resetBtn = document.getElementById('reset');
+    const restartModelsBtn = document.getElementById('restartModels');
 
     let soundOn = true;
     let biteCount = 0;
+
+    // Debug console
+    const debugConsole = document.getElementById('debugConsole');
+    const debugStats = document.getElementById('debugStats');
+    const debugToggle = document.getElementById('debugToggle');
+    let debugVisible = false;
+    
+    debugToggle.onclick = () => {
+      debugVisible = !debugVisible;
+      debugConsole.classList.toggle('visible', debugVisible);
+      debugStats.style.display = debugVisible ? 'block' : 'none';
+      debugToggle.textContent = debugVisible ? 'Hide Debug' : 'Debug';
+    };
+    // Hide stats by default
+    debugStats.style.display = 'none';
+    
+    const debugLog = [];
+    const MAX_DEBUG_LINES = 50;
+    let lastHandsResultAt = 0;
+    let lastFaceResultAt = 0;
+    let handsModelReady = false;
+    let faceModelReady = false;
+    let frameCount = 0;
+    let lastFpsUpdate = Date.now();
+    let currentFps = 0;
+
+    function logDebug(msg, level = 'log') {
+      const ts = new Date().toLocaleTimeString();
+      const entry = { ts, msg, level };
+      debugLog.push(entry);
+      if (debugLog.length > MAX_DEBUG_LINES) debugLog.shift();
+      renderDebugConsole();
+      console.log(`[${ts}] ${msg}`);
+    }
+
+    function renderDebugConsole() {
+      debugConsole.innerHTML = debugLog.map(e => 
+        `<div class="${e.level}">[${e.ts}] ${e.msg}</div>`
+      ).join('');
+      debugConsole.scrollTop = debugConsole.scrollHeight;
+    }
+
+    function updateDebugStats() {
+      const now = Date.now();
+      const handsAge = now - lastHandsResultAt;
+      const faceAge = now - lastFaceResultAt;
+      const handsOk = handsModelReady && handsAge < 1000;
+      const faceOk = faceModelReady && faceAge < 1000;
+      
+      const handsStatus = handsModelReady 
+        ? (handsAge < 1000 ? 'OK' : 'STALE ' + Math.round(handsAge/1000) + 's')
+        : 'LOADING';
+      
+      const faceStatus = faceModelReady 
+        ? (faceAge < 1000 ? 'OK' : 'STALE ' + Math.round(faceAge/1000) + 's')
+        : 'LOADING';
+      
+      debugStats.innerHTML = `
+        <div>FPS: ${currentFps}</div>
+        <div>Hands: <span class="${handsOk ? 'ok' : 'bad'}">${handsStatus}</span></div>
+        <div>Face: <span class="${faceOk ? 'ok' : 'bad'}">${faceStatus}</span></div>
+        <div>Last Hands: ${lastHands?.multiHandLandmarks?.length || 0} detected</div>
+        <div>Last Face: ${lastFace?.multiFaceLandmarks?.length || 0} detected</div>
+      `;
+    }
+
+    setInterval(updateDebugStats, 200);
 
     let isPaused = false;
     let pauseUntil = 0;
@@ -163,6 +291,17 @@
       warnEl.textContent = "";
     };
 
+    // Restart models when stuck
+    restartModelsBtn.onclick = () => {
+      warnEl.textContent = "Restarting models...";
+      logDebug('Manual model restart requested', 'info');
+      resetFaceModel();
+      resetHandsModel();
+      warnEl.textContent = "✅ Models reset";
+      logDebug('Models reset successfully', 'info');
+      setTimeout(() => { warnEl.textContent = ""; }, 2000);
+    };
+
     function dist(a, b) {
       const dx = a.x - b.x;
       const dy = a.y - b.y;
@@ -215,23 +354,71 @@
     let lastFace = null;
     let lastHands = null;
 
+    // Track processing state per model to prevent queuing
+    let handsProcessing = false;
+    let faceProcessing = false;
+    let lastHandsSendAt = 0;
+    let lastFaceSendAt = 0;
+    let handsSendCount = 0;
+    let faceSendCount = 0;
+
     const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
     hands.setOptions({
       maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.6
+      modelComplexity: 0,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
     });
-    hands.onResults(res => { lastHands = res; });
+    hands.onResults(res => { 
+      lastHands = res;
+      lastHandsResultAt = Date.now();
+      handsProcessing = false;
+      if (!handsModelReady) {
+        handsModelReady = true;
+        logDebug('Hands model ready', 'info');
+      }
+    });
 
     const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
     faceMesh.setOptions({
       maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.6
+      refineLandmarks: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
     });
-    faceMesh.onResults(res => { lastFace = res; });
+    faceMesh.onResults(res => { 
+      lastFace = res;
+      lastFaceResultAt = Date.now();
+      faceProcessing = false;
+      if (!faceModelReady) {
+        faceModelReady = true;
+        logDebug('Face mesh model ready', 'info');
+      }
+    });
+
+    function resetFaceModel() {
+      logDebug('Resetting face model...', 'warn');
+      faceProcessing = false;
+      try {
+        faceMesh.reset();
+      } catch (e) {
+        logDebug('Face reset error: ' + e.message, 'error');
+      }
+      lastFaceResultAt = Date.now();
+      lastFaceSendAt = 0;
+    }
+
+    function resetHandsModel() {
+      logDebug('Resetting hands model...', 'warn');
+      handsProcessing = false;
+      try {
+        hands.reset();
+      } catch (e) {
+        logDebug('Hands reset error: ' + e.message, 'error');
+      }
+      lastHandsResultAt = Date.now();
+      lastHandsSendAt = 0;
+    }
 
     calibrateBtn.onclick = () => {
       const w = video.videoWidth;
@@ -281,14 +468,54 @@
       const now = Date.now();
       resumeIfNeeded();
 
-      if (!lastFace || !lastHands) return;
+      // Update FPS counter
+      frameCount++;
+      if (now - lastFpsUpdate >= 1000) {
+        currentFps = frameCount;
+        frameCount = 0;
+        lastFpsUpdate = now;
+      }
 
       const w = video.videoWidth;
       const h = video.videoHeight;
-      if (!w || !h) return;
+      
+      // Always draw video first
+      if (w && h) {
+        canvas.width = w; 
+        canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+      }
 
-      const faceLm = lastFace.multiFaceLandmarks?.[0];
-      const handLms = lastHands.multiHandLandmarks || [];
+      // Check if models are responding
+      const handsStale = handsModelReady && (now - lastHandsResultAt > 3000);
+      const faceStale = faceModelReady && (now - lastFaceResultAt > 3000);
+      
+      if (handsStale && !window._handsStaleLogged) {
+        logDebug('WARNING: Hands model not responding for 3+ seconds', 'warn');
+        window._handsStaleLogged = true;
+      } else if (!handsStale) {
+        window._handsStaleLogged = false;
+      }
+      
+      if (faceStale && !window._faceStaleLogged) {
+        logDebug('WARNING: Face model not responding for 3+ seconds', 'warn');
+        window._faceStaleLogged = true;
+      } else if (!faceStale) {
+        window._faceStaleLogged = false;
+      }
+
+      if (!lastFace && !lastHands) {
+        statusEl.textContent = "waiting for models...";
+        return;
+      }
+
+      if (!w || !h) {
+        statusEl.textContent = "waiting for video...";
+        return;
+      }
+
+      const faceLm = lastFace?.multiFaceLandmarks?.[0];
+      const handLms = lastHands?.multiHandLandmarks || [];
 
       const hasFace = !!faceLm;
       const hasHands = handLms.length > 0;
@@ -304,15 +531,40 @@
         window.app?.hideTrackingLost();
       }
 
+      // ALWAYS draw finger points if we have hand data (even if mouth not visible)
+      if (hasHands) {
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        for (const hlm of handLms) {
+          const points = fingerPointsPx(hlm, w, h);
+          for (const p of points) {
+            ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill();
+          }
+        }
+      }
+
+      // ALWAYS draw mouth position if we have face data (even if partially occluded)
+      if (hasFace) {
+        try {
+          const mouth = mouthCenterPx(faceLm, w, h);
+          // Draw mouth marker (red if not fully visible, white if ok)
+          ctx.fillStyle = mouthVisible ? "rgba(255,255,255,0.9)" : "rgba(255,100,100,0.7)";
+          ctx.beginPath(); ctx.arc(mouth.x, mouth.y, 5, 0, Math.PI*2); ctx.fill();
+          
+          // Draw threshold circle
+          ctx.strokeStyle = mouthVisible ? "rgba(255,255,255,0.35)" : "rgba(255,100,100,0.25)";
+          ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(mouth.x, mouth.y, distThresholdPx, 0, Math.PI*2); ctx.stroke();
+        } catch (e) {
+          logDebug('Error drawing mouth: ' + e.message, 'error');
+        }
+      }
+
       if (!mouthVisible) {
         statusEl.textContent = hasFace 
           ? (hasHands ? "hands detected, mouth not visible" : "mouth not visible")
           : (hasHands ? "hands detected, no face" : "no face");
         nearSince = null;
         maybeShowTrackingLost(now, hasFace);
-
-        canvas.width = w; canvas.height = h;
-        ctx.drawImage(video, 0, 0, w, h);
         return;
       }
 
@@ -357,29 +609,11 @@
         nearSince = null;
       }
 
-      canvas.width = w; canvas.height = h;
-      ctx.drawImage(video, 0, 0, w, h);
-
-      // Draw finger points
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      for (const hlm of handLms) {
-        const points = fingerPointsPx(hlm, w, h);
-        for (const p of points) {
-          ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fill();
-        }
-      }
-
-      // Draw mouth center
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.beginPath(); ctx.arc(mouth.x, mouth.y, 5, 0, Math.PI*2); ctx.fill();
-
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(mouth.x, mouth.y, distThresholdPx, 0, Math.PI*2); ctx.stroke();
     }
 
     async function start() {
       statusEl.textContent = "requesting camera…";
+      logDebug('Requesting camera...', 'info');
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -388,17 +622,110 @@
 
       video.srcObject = stream;
       await video.play();
+      logDebug('Camera started, video playing', 'info');
 
-      const camera = new Camera(video, {
-        onFrame: async () => {
-          await faceMesh.send({ image: video });
+      statusEl.textContent = "loading models...";
+      
+      // Initialize models before sending frames
+      logDebug('Initializing hands model...', 'info');
+      try {
+        await hands.initialize();
+        logDebug('Hands model initialized', 'info');
+      } catch (e) {
+        logDebug('Hands init error (may be ok): ' + e.message, 'warn');
+      }
+      
+      logDebug('Initializing face model...', 'info');
+      try {
+        await faceMesh.initialize();
+        logDebug('Face model initialized', 'info');
+      } catch (e) {
+        logDebug('Face init error (may be ok): ' + e.message, 'warn');
+      }
+      
+      statusEl.textContent = "starting detection...";
+
+      let framesSent = 0;
+      
+      // Send frames to each model independently with timeout protection
+      async function sendToHands() {
+        if (handsProcessing) return; // Skip if previous send hasn't returned
+        
+        const now = Date.now();
+        // Detect stuck model: if we sent but didn't get response in 8s, reset
+        if (lastHandsSendAt > 0 && now - lastHandsSendAt > 8000 && now - lastHandsResultAt > 8000) {
+          logDebug('Hands model appears stuck, resetting...', 'warn');
+          resetHandsModel();
+          return;
+        }
+        
+        handsProcessing = true;
+        lastHandsSendAt = now;
+        handsSendCount++;
+        try {
           await hands.send({ image: video });
-        },
-        width: 1280,
-        height: 720
-      });
-
-      camera.start();
+        } catch (e) {
+          handsProcessing = false;
+          if (handsSendCount <= 3) logDebug('Hands send error: ' + e.message, 'error');
+        }
+      }
+      
+      async function sendToFace() {
+        if (faceProcessing) return; // Skip if previous send hasn't returned
+        
+        const now = Date.now();
+        // Detect stuck model: if we sent but didn't get response in 8s, reset
+        if (lastFaceSendAt > 0 && now - lastFaceSendAt > 8000 && now - lastFaceResultAt > 8000) {
+          logDebug('Face model appears stuck, resetting...', 'warn');
+          resetFaceModel();
+          return;
+        }
+        
+        faceProcessing = true;
+        lastFaceSendAt = now;
+        faceSendCount++;
+        try {
+          await faceMesh.send({ image: video });
+        } catch (e) {
+          faceProcessing = false;
+          if (faceSendCount <= 3) logDebug('Face send error: ' + e.message, 'error');
+        }
+      }
+      
+      // Throttle frame sends - don't overwhelm the models
+      const MIN_FRAME_INTERVAL_MS = 50; // Max ~20 fps to models
+      let lastFrameTime = 0;
+      
+      // Use manual frame loop - send to models in parallel
+      async function processFrame() {
+        const now = Date.now();
+        
+        // Throttle to avoid overwhelming models
+        if (now - lastFrameTime >= MIN_FRAME_INTERVAL_MS) {
+          lastFrameTime = now;
+          framesSent++;
+          
+          if (framesSent === 1) {
+            logDebug('First frame being sent to models...', 'info');
+          }
+          if (framesSent % 300 === 0) {
+            logDebug(`Frames sent: ${framesSent}`, 'info');
+          }
+          
+          // Send to both models independently (don't wait for one before other)
+          sendToHands();
+          sendToFace();
+        }
+        
+        requestAnimationFrame(processFrame);
+      }
+      
+      // Small delay to ensure WASM modules are fully ready
+      logDebug('Waiting for models to be ready...', 'info');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      requestAnimationFrame(processFrame);
+      logDebug('Frame loop started', 'info');
       statusEl.textContent = "watching";
       modeEl.textContent = "ACTIVE";
 
@@ -413,9 +740,66 @@
 
     start().catch(err => {
       console.error(err);
+      logDebug('STARTUP ERROR: ' + (err.message || err), 'error');
       statusEl.textContent = "camera error (check permissions)";
       warnEl.textContent = String(err.message || err);
     });
+
+    // Periodic health check with auto-recovery
+    let lastHandsResetAt = 0;
+    let lastFaceResetAt = 0;
+    let faceResetCount = 0;
+    let handsResetCount = 0;
+    const AUTO_RECOVERY_COOLDOWN_MS = 30000; // Don't reset same model more than once per 30s
+    
+    setInterval(() => {
+      const now = Date.now();
+      const handsStaleFor = now - lastHandsResultAt;
+      const faceStaleFor = now - lastFaceResultAt;
+      
+      // Log warnings but less frequently
+      if (handsModelReady && handsStaleFor > 10000 && handsStaleFor < 11000) {
+        logDebug('WARNING: Hands model unresponsive for 10+ seconds', 'warn');
+      }
+      if (faceModelReady && faceStaleFor > 10000 && faceStaleFor < 11000) {
+        logDebug('WARNING: Face model unresponsive for 10+ seconds', 'warn');
+      }
+      
+      // Auto-reset face model if stale
+      if (faceModelReady && faceStaleFor > 15000 && (now - lastFaceResetAt > AUTO_RECOVERY_COOLDOWN_MS)) {
+        lastFaceResetAt = now;
+        faceResetCount++;
+        logDebug(`Auto-recovery: Resetting face model (attempt ${faceResetCount})...`, 'warn');
+        warnEl.textContent = "⚠️ Resetting face model...";
+        resetFaceModel();
+        
+        // If we've reset too many times, suggest page reload
+        if (faceResetCount >= 3) {
+          warnEl.textContent = "⚠️ Face model unstable - consider reloading page";
+          logDebug('Face model repeatedly failing - page reload recommended', 'error');
+        } else {
+          warnEl.textContent = "✅ Face model reset";
+          setTimeout(() => { warnEl.textContent = ""; }, 2000);
+        }
+      }
+      
+      // Auto-reset hands model if stale  
+      if (handsModelReady && handsStaleFor > 15000 && (now - lastHandsResetAt > AUTO_RECOVERY_COOLDOWN_MS)) {
+        lastHandsResetAt = now;
+        handsResetCount++;
+        logDebug(`Auto-recovery: Resetting hands model (attempt ${handsResetCount})...`, 'warn');
+        warnEl.textContent = "⚠️ Resetting hands model...";
+        resetHandsModel();
+        
+        if (handsResetCount >= 3) {
+          warnEl.textContent = "⚠️ Hands model unstable - consider reloading page";
+          logDebug('Hands model repeatedly failing - page reload recommended', 'error');
+        } else {
+          warnEl.textContent = "✅ Hands model reset";
+          setTimeout(() => { warnEl.textContent = ""; }, 2000);
+        }
+      }
+    }, 5000);
   </script>
 </body>
 </html>
