@@ -751,6 +751,16 @@
     let faceResetCount = 0;
     let handsResetCount = 0;
     const AUTO_RECOVERY_COOLDOWN_MS = 30000; // Don't reset same model more than once per 30s
+    const MAX_RESETS_BEFORE_RELOAD = 5; // Auto-reload page after this many failed resets
+    
+    function performPageReload(reason) {
+      logDebug(`Page reload triggered: ${reason}`, 'error');
+      warnEl.textContent = "🔄 Reloading page to recover...";
+      // Small delay to let the message show
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    }
     
     setInterval(() => {
       const now = Date.now();
@@ -773,10 +783,13 @@
         warnEl.textContent = "⚠️ Resetting face model...";
         resetFaceModel();
         
-        // If we've reset too many times, suggest page reload
-        if (faceResetCount >= 3) {
-          warnEl.textContent = "⚠️ Face model unstable - consider reloading page";
-          logDebug('Face model repeatedly failing - page reload recommended', 'error');
+        // Auto-reload page if too many resets failed
+        if (faceResetCount >= MAX_RESETS_BEFORE_RELOAD) {
+          performPageReload('Face model repeatedly failing');
+          return;
+        } else if (faceResetCount >= 3) {
+          warnEl.textContent = `⚠️ Face model unstable (${faceResetCount}/${MAX_RESETS_BEFORE_RELOAD} before reload)`;
+          logDebug('Face model repeatedly failing - will auto-reload soon', 'error');
         } else {
           warnEl.textContent = "✅ Face model reset";
           setTimeout(() => { warnEl.textContent = ""; }, 2000);
@@ -791,9 +804,13 @@
         warnEl.textContent = "⚠️ Resetting hands model...";
         resetHandsModel();
         
-        if (handsResetCount >= 3) {
-          warnEl.textContent = "⚠️ Hands model unstable - consider reloading page";
-          logDebug('Hands model repeatedly failing - page reload recommended', 'error');
+        // Auto-reload page if too many resets failed
+        if (handsResetCount >= MAX_RESETS_BEFORE_RELOAD) {
+          performPageReload('Hands model repeatedly failing');
+          return;
+        } else if (handsResetCount >= 3) {
+          warnEl.textContent = `⚠️ Hands model unstable (${handsResetCount}/${MAX_RESETS_BEFORE_RELOAD} before reload)`;
+          logDebug('Hands model repeatedly failing - will auto-reload soon', 'error');
         } else {
           warnEl.textContent = "✅ Hands model reset";
           setTimeout(() => { warnEl.textContent = ""; }, 2000);
